@@ -1,60 +1,128 @@
 import './style.css'
-import typescriptLogo from './assets/typescript.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
-import { setupCounter } from './counter.ts'
+import {UPDATE_INTERVAL} from "./constants.ts";
 
-document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
-<section id="center">
-  <div class="hero">
-    <img src="${heroImg}" class="base" width="170" height="179">
-    <img src="${typescriptLogo}" class="framework" alt="TypeScript logo"/>
-    <img src=${viteLogo} class="vite" alt="Vite logo" />
-  </div>
-  <div>
-    <h1>Get started</h1>
-    <p>Edit <code>src/main.ts</code> and save to test <code>HMR</code></p>
-  </div>
-  <button id="counter" type="button" class="counter"></button>
-</section>
+// getting the html canvas
+const canvas: HTMLCanvasElement = document.getElementById("GLCanvas")! as HTMLCanvasElement
 
-<div class="ticks"></div>
+// MAIN SETUP FOR RENDERING
+const adapter = await navigator.gpu?.requestAdapter();
+const device = await adapter?.requestDevice();
 
-<section id="next-steps">
-  <div id="docs">
-    <svg class="icon" role="presentation" aria-hidden="true"><use href="/icons.svg#documentation-icon"></use></svg>
-    <h2>Documentation</h2>
-    <p>Your questions, answered</p>
-    <ul>
-      <li>
-        <a href="https://vite.dev/" target="_blank">
-          <img class="logo" src=${viteLogo} alt="" />
-          Explore Vite
-        </a>
-      </li>
-      <li>
-        <a href="https://www.typescriptlang.org" target="_blank">
-          <img class="button-icon" src="${typescriptLogo}" alt="">
-          Learn more
-        </a>
-      </li>
-    </ul>
-  </div>
-  <div id="social">
-    <svg class="icon" role="presentation" aria-hidden="true"><use href="/icons.svg#social-icon"></use></svg>
-    <h2>Connect with us</h2>
-    <p>Join the Vite community</p>
-    <ul>
-      <li><a href="https://github.com/vitejs/vite" target="_blank"><svg class="button-icon" role="presentation" aria-hidden="true"><use href="/icons.svg#github-icon"></use></svg>GitHub</a></li>
-      <li><a href="https://chat.vite.dev/" target="_blank"><svg class="button-icon" role="presentation" aria-hidden="true"><use href="/icons.svg#discord-icon"></use></svg>Discord</a></li>
-      <li><a href="https://x.com/vite_js" target="_blank"><svg class="button-icon" role="presentation" aria-hidden="true"><use href="/icons.svg#x-icon"></use></svg>X.com</a></li>
-      <li><a href="https://bsky.app/profile/vite.dev" target="_blank"><svg class="button-icon" role="presentation" aria-hidden="true"><use href="/icons.svg#bluesky-icon"></use></svg>Bluesky</a></li>
-    </ul>
-  </div>
-</section>
+if (!device) {
+    throw Error("No gpu detected")
+}
 
-<div class="ticks"></div>
-<section id="spacer"></section>
-`
+const context = canvas.getContext("webgpu")
+if (!context){
+    throw Error("Error getting the context");
+}
 
-setupCounter(document.querySelector<HTMLButtonElement>('#counter')!)
+const devicePixelRatio = window.devicePixelRatio
+canvas.width = canvas.clientWidth * devicePixelRatio
+canvas.height = canvas.clientHeight * devicePixelRatio
+
+const presentationFormat = navigator.gpu.getPreferredCanvasFormat()
+context.configure({
+    device: device,
+    format: presentationFormat,
+})
+
+// END MAIN SETUP FOR RENDERING
+
+// LOAD SHADERS
+const loadWGSL = async (path: string)=> {
+    const response = await fetch(path)
+    if (!response.ok) {
+        throw new Error(`Failed to load shader: ${path}`)
+    }
+    return response.text()
+}
+
+const loadShaderModule = async (path: string): Promise<GPUShaderModule> => {
+    const code = await loadWGSL(path)
+    return device.createShaderModule({ code })
+};
+
+const vertexShader = await loadShaderModule('shaders/vertex.wgsl')
+const fragmentShader = await loadShaderModule('shaders/fragment.wgsl')
+const computeShader = await loadShaderModule('shaders/compute.wgsl')
+// END LOAD SHADERS
+
+// PIPELINES SETUP
+
+const pipelineLayout = device.createPipelineLayout({
+    label: "Pipeline Layout",
+    bindGroupLayouts: []
+})
+
+const renderPipeline = device.createRenderPipeline({
+    label: "Render Pipeline",
+    layout: pipelineLayout,
+    vertex: {
+        module: vertexShader,
+        buffers: []
+    },
+    fragment: {
+        module: fragmentShader,
+        targets: [{format: presentationFormat}]
+    },
+})
+
+// const computePipeline = device.createComputePipeline({
+//     label: "Compute Pipeline",
+//     layout: pipelineLayout,
+//     compute: {
+//         module: computeShader,
+//         entryPoint: "computeMain"
+//     },
+// })
+
+const renderPassDescriptor = {
+    label: "Render Pass Description",
+    colorAttachments: [{
+        clearValue: [0.8, 0.8, 0.0, 1.0],
+        loadOp: "clear",
+        storeOp: "store",
+        view: context.getCurrentTexture().createView()
+    }]
+}
+
+// END PIPELINES SETUP
+
+// RENDER 
+
+const render = () => {
+    (renderPassDescriptor.colorAttachments as any)[0].view = context.getCurrentTexture().createView()
+
+    const encoder = device.createCommandEncoder({label: "command encoder"})
+
+    // COMPUTE PASS
+    // const computePass = encoder.beginComputePass()
+    // computePass.setPipeline(computePipeline)
+    // computePass.setBindGroup(0, bindGroups![step % 2])
+    //
+    // const workgroupCount = Math.ceil(GRID_SIZE / WORKGROUP_SIZE);
+    // computePass.dispatchWorkgroups(workgroupCount, workgroupCount)
+    //
+    // computePass.end()
+    //
+    // step++;
+
+    // RENDER PASS
+    // @ts-ignore
+    const renderPass = encoder.beginRenderPass(renderPassDescriptor);
+    renderPass.setPipeline(renderPipeline)
+
+    renderPass.draw(3)
+    renderPass.end()
+
+    device.queue.submit([encoder.finish()])
+}
+
+const renderLoop = () => {
+    setInterval(() => render(), UPDATE_INTERVAL)
+}
+
+renderLoop()
+
+// END RENDER 
