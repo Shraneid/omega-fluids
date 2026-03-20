@@ -1,1 +1,2 @@
-export const UPDATE_INTERVAL = 100;
+export const SIM_SIZE = 128;
+export const WORKGROUP_SIZE = 8;

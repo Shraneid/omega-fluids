@@ -1,38 +1,25 @@
-@group(0) @binding(1) var<uniform> grid: vec2f;
-
-@group(0) @binding(2) var<storage> cellStateIn: array<u32>;
-@group(0) @binding(3) var<storage, read_write> cellStateOut: array<u32>;
-
-fn cellIndex(cell: vec2u) -> u32 {
-  return (cell.y % u32(grid.y)) * u32(grid.x) +
-         (cell.x % u32(grid.x));
+struct SimParams {
+    dt: f32,
+    dx: f32,
 }
 
-fn cellActive(x: u32, y: u32) -> u32 {
-    return cellStateIn[cellIndex(vec2(x,y))];
-}
+@group(0) @binding(0) var texture_velocity_previous: texture_2d<f32>;
+@group(0) @binding(1) var texture_velocity_update: texture_storage_2d<rgba16float, write>;
+
+@group(0) @binding(2) var texture_pressure_previous: texture_2d<f32>;
+@group(0) @binding(3) var texture_pressure_update: texture_storage_2d<rgba16float, write>;
+
+@group(0) @binding(4) var sampler_texture: sampler;
+@group(0) @binding(5) var<uniform> dt: SimParams;
+
+
 
 @compute
 @workgroup_size(8, 8)
-fn computeMain(@builtin(global_invocation_id) cell: vec3u) {
-    let activeNeighbors = cellActive(cell.x+1, cell.y+1) +
-                          cellActive(cell.x+1, cell.y) +
-                          cellActive(cell.x+1, cell.y-1) +
-                          cellActive(cell.x, cell.y-1) +
-                          cellActive(cell.x-1, cell.y-1) +
-                          cellActive(cell.x-1, cell.y) +
-                          cellActive(cell.x-1, cell.y+1) +
-                          cellActive(cell.x, cell.y+1);
+fn computeMain(@builtin(global_invocation_id) pos: vec3u) {
+    let texel = pos.xy;
+    let position = (vec2f(texel) + 0.5) / vec2f(textureDimensions(texture_velocity_previous));
 
-    let i = cellIndex(cell.xy);
-
-    switch activeNeighbors {
-        case 2: {
-            cellStateOut[i] = cellStateIn[i];
-        } case 3: {
-            cellStateOut[i] = 1;
-        } default : {
-            cellStateOut[i] = 0;
-        }
-    }
+    let currentColor = textureSampleLevel(texture_velocity_previous, sampler_texture, position, 0);
+    textureStore(texture_velocity_update, texel, currentColor + vec4(.005f, 0.0f, 0.0f, 0.0f));
 }

@@ -1,7 +1,21 @@
 import './style.css'
-import {UPDATE_INTERVAL} from "./constants.ts";
+import {SIM_SIZE, WORKGROUP_SIZE} from "./constants.ts";
 
-// getting the html canvas
+let current_ping_pong_buffer_index = 1;
+
+const debugData = new Float32Array(SIM_SIZE * SIM_SIZE * 4); // 4 channels (rgba)
+for (let y = 0; y < SIM_SIZE; y++) {
+    for (let x = 0; x < SIM_SIZE; x++) {
+        const i = (y * SIM_SIZE + x) * 4;
+        const val = y % 2 === 0 ? 1.0 : 0.0;
+        debugData[i + 0] = val; // r
+        debugData[i + 1] = val; // g
+        debugData[i + 2] = 0.0; // b
+        debugData[i + 3] = 1.0; // a
+    }
+}
+
+// getting the HTML canvas
 const canvas: HTMLCanvasElement = document.getElementById("GLCanvas")! as HTMLCanvasElement
 
 // MAIN SETUP FOR RENDERING
@@ -26,8 +40,8 @@ context.configure({
     device: device,
     format: presentationFormat,
 })
-
 // END MAIN SETUP FOR RENDERING
+
 
 // LOAD SHADERS
 const loadWGSL = async (path: string)=> {
@@ -48,16 +62,110 @@ const fragmentShader = await loadShaderModule('shaders/fragment.wgsl')
 const computeShader = await loadShaderModule('shaders/compute.wgsl')
 // END LOAD SHADERS
 
-// PIPELINES SETUP
 
-const pipelineLayout = device.createPipelineLayout({
-    label: "Pipeline Layout",
-    bindGroupLayouts: []
+// BUFFERS
+const uniformBuffer = device.createBuffer({
+    label: "Uniform Buffer",
+    size: 16,
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+})
+
+const velocityTextureBuffers = [
+    device.createTexture({
+        label: "Velocity Texture Buffer A",
+        size: [SIM_SIZE, SIM_SIZE],
+        format: "rgba16float",
+        usage:
+            GPUTextureUsage.TEXTURE_BINDING |
+            GPUTextureUsage.STORAGE_BINDING |
+            GPUTextureUsage.COPY_DST
+    }),
+    device.createTexture({
+        label: "Velocity Texture Buffer B",
+        size: [SIM_SIZE, SIM_SIZE],
+        format: "rgba16float",
+        usage:
+            GPUTextureUsage.TEXTURE_BINDING |
+            GPUTextureUsage.STORAGE_BINDING |
+            GPUTextureUsage.COPY_DST
+    }),
+]
+
+const pressureTextureBuffers = [
+    device.createTexture({
+        label: "Pressure Texture Buffer A",
+        size: [SIM_SIZE, SIM_SIZE],
+        format: "rgba16float",
+        usage:
+            GPUTextureUsage.TEXTURE_BINDING |
+            GPUTextureUsage.STORAGE_BINDING |
+            GPUTextureUsage.COPY_DST
+    }),
+    device.createTexture({
+        label: "Pressure Texture Buffer B",
+        size: [SIM_SIZE, SIM_SIZE],
+        format: "rgba16float",
+        usage:
+            GPUTextureUsage.TEXTURE_BINDING |
+            GPUTextureUsage.STORAGE_BINDING |
+            GPUTextureUsage.COPY_DST
+    }),
+]
+
+const sampler = device.createSampler({
+    // TODO: fix this
+    // magFilter: "linear",
+    // minFilter: "linear",
+    magFilter: "nearest",
+    minFilter: "nearest",
+    addressModeU: "clamp-to-edge",
+    addressModeV: "clamp-to-edge",
+})
+// END BUFFERS
+
+
+// BIND GROUP LAYOUTS
+const computeBindGroupLayout = device.createBindGroupLayout({
+    label: "Compute Bind Group Layout",
+    entries: [
+        {binding: 0, visibility: GPUShaderStage.COMPUTE, texture: {sampleType: "float"}},
+        {binding: 1, visibility: GPUShaderStage.COMPUTE, storageTexture: {format: "rgba16float", access:"write-only"}},
+        {binding: 2, visibility: GPUShaderStage.COMPUTE, texture: {sampleType: "float"}},
+        {binding: 3, visibility: GPUShaderStage.COMPUTE, storageTexture: {format: "rgba16float", access:"write-only"}},
+        {binding: 4, visibility: GPUShaderStage.COMPUTE, sampler: {}},
+        {binding: 5, visibility: GPUShaderStage.COMPUTE, buffer: {type: "uniform"}},
+    ]
+})
+
+const renderBindGroupLayout = device.createBindGroupLayout({
+    label: "Render Bind Group Layout",
+    entries: [
+        {binding: 0, visibility: GPUShaderStage.FRAGMENT, texture: {sampleType: "float"}},
+        {binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: {}}
+    ]
+})
+// END BIND GROUP LAYOUTS
+
+
+// PIPELINES SETUP
+const computePipelineLayout = device.createPipelineLayout({
+    label: "Compute Pipeline Layout",
+    bindGroupLayouts: [computeBindGroupLayout]
+})
+const renderPipelineLayout = device.createPipelineLayout({
+    label: "Render Pipeline Layout",
+    bindGroupLayouts: [renderBindGroupLayout]
+})
+
+const computePipeline = device.createComputePipeline({
+    label: "Compute Pipeline",
+    layout: computePipelineLayout,
+    compute: {module: computeShader, entryPoint: "computeMain"},
 })
 
 const renderPipeline = device.createRenderPipeline({
     label: "Render Pipeline",
-    layout: pipelineLayout,
+    layout: renderPipelineLayout,
     vertex: {
         module: vertexShader,
         buffers: []
@@ -68,14 +176,99 @@ const renderPipeline = device.createRenderPipeline({
     },
 })
 
-// const computePipeline = device.createComputePipeline({
-//     label: "Compute Pipeline",
-//     layout: pipelineLayout,
-//     compute: {
-//         module: computeShader,
-//         entryPoint: "computeMain"
-//     },
-// })
+const computeBindGroups = [
+    device.createBindGroup({
+        label: "Compute Bind Group A",
+        layout: computeBindGroupLayout,
+        entries: [
+            {
+                binding: 0,
+                resource: velocityTextureBuffers[0].createView(),
+            },
+            {
+                binding: 1,
+                resource: velocityTextureBuffers[1].createView(),
+            },
+            {
+                binding: 2,
+                resource: pressureTextureBuffers[0].createView(),
+            },
+            {
+                binding: 3,
+                resource: pressureTextureBuffers[1].createView(),
+            },
+            {
+                binding: 4,
+                resource: sampler,
+            },
+            {
+                binding: 5,
+                resource: { buffer: uniformBuffer },
+            },
+        ]
+    }),
+    device.createBindGroup({
+        label: "Compute Bind Group B",
+        layout: computeBindGroupLayout,
+        entries: [
+            {
+                binding: 0,
+                resource: velocityTextureBuffers[1].createView(),
+            },
+            {
+                binding: 1,
+                resource: velocityTextureBuffers[0].createView(),
+            },
+            {
+                binding: 2,
+                resource: pressureTextureBuffers[1].createView(),
+            },
+            {
+                binding: 3,
+                resource: pressureTextureBuffers[0].createView(),
+            },
+            {
+                binding: 4,
+                resource: sampler,
+            },
+            {
+                binding: 5,
+                resource: { buffer: uniformBuffer },
+            },
+        ]
+    }),
+]
+
+const renderBindGroups = [
+    device.createBindGroup({
+        label: "Render Bind Group A",
+        layout: renderBindGroupLayout,
+        entries: [
+            {
+                binding: 0,
+                resource: velocityTextureBuffers[1].createView(),
+            },
+            {
+                binding: 1,
+                resource: sampler,
+            },
+        ]
+    }),
+    device.createBindGroup({
+        label: "Render Bind Group B",
+        layout: renderBindGroupLayout,
+        entries: [
+            {
+                binding: 0,
+                resource: velocityTextureBuffers[0].createView(),
+            },
+            {
+                binding: 1,
+                resource: sampler,
+            },
+        ]
+    }),
+]
 
 const renderPassDescriptor = {
     label: "Render Pass Description",
@@ -86,43 +279,63 @@ const renderPassDescriptor = {
         view: context.getCurrentTexture().createView()
     }]
 }
-
 // END PIPELINES SETUP
 
-// RENDER 
+// debug first state
+device.queue.writeTexture(
+    {texture: velocityTextureBuffers[0]},
+    debugData,
+    //      rgba * float32 * ...
+    {bytesPerRow: 4 * 4 * SIM_SIZE},
+    {width: SIM_SIZE, height: SIM_SIZE}
+)
 
-const render = () => {
-    (renderPassDescriptor.colorAttachments as any)[0].view = context.getCurrentTexture().createView()
+// RENDER
+const render = (deltaTime:number, elapsedTime:number) => {
+    current_ping_pong_buffer_index = current_ping_pong_buffer_index ? 0 : 1;
+
+    renderPassDescriptor.colorAttachments[0].view = context.getCurrentTexture().createView()
 
     const encoder = device.createCommandEncoder({label: "command encoder"})
 
     // COMPUTE PASS
-    // const computePass = encoder.beginComputePass()
-    // computePass.setPipeline(computePipeline)
-    // computePass.setBindGroup(0, bindGroups![step % 2])
-    //
-    // const workgroupCount = Math.ceil(GRID_SIZE / WORKGROUP_SIZE);
-    // computePass.dispatchWorkgroups(workgroupCount, workgroupCount)
-    //
-    // computePass.end()
-    //
-    // step++;
+    const computePass = encoder.beginComputePass()
+    computePass.setPipeline(computePipeline)
+    computePass.setBindGroup(0, computeBindGroups[current_ping_pong_buffer_index])
+
+    const workgroupCount = Math.ceil(SIM_SIZE/WORKGROUP_SIZE)
+    computePass.dispatchWorkgroups(workgroupCount, workgroupCount)
+
+    computePass.end()
 
     // RENDER PASS
     // @ts-ignore
     const renderPass = encoder.beginRenderPass(renderPassDescriptor);
     renderPass.setPipeline(renderPipeline)
 
+    renderPass.setBindGroup(0, renderBindGroups[current_ping_pong_buffer_index])
+
     renderPass.draw(3)
     renderPass.end()
 
     device.queue.submit([encoder.finish()])
 }
+let startTime: number;
+let lastFrameTime: number;
 
-const renderLoop = () => {
-    setInterval(() => render(), UPDATE_INTERVAL)
+const renderLoop = (timestamp: number) => {
+    if (startTime === undefined) {
+        startTime = timestamp;
+        lastFrameTime = timestamp;
+    }
+    const elapsedTime = timestamp - startTime;
+    const deltaTime = timestamp - lastFrameTime;
+
+    render(deltaTime, elapsedTime)
+
+    lastFrameTime = timestamp
+    requestAnimationFrame(renderLoop)
 }
 
-renderLoop()
-
+requestAnimationFrame(renderLoop)
 // END RENDER 
