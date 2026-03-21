@@ -116,10 +116,8 @@ const pressureTextureBuffers = [
 ]
 
 const sampler = device.createSampler({
-    // magFilter: "linear",
-    // minFilter: "linear",
-    magFilter: "nearest",
-    minFilter: "nearest",
+    magFilter: "linear",
+    minFilter: "linear",
     addressModeU: "clamp-to-edge",
     addressModeV: "clamp-to-edge",
 })
