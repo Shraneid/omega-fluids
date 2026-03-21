@@ -27,18 +27,6 @@ fn isBoundary(pos: vec2u) -> bool {
     }
 }
 
-
-@compute
-@workgroup_size(8, 8)
-fn computeMain(@builtin(global_invocation_id) pos: vec3u) {
-    let texel = pos.xy;
-    let position = (vec2f(texel) + 0.5) / vec2f(textureDimensions(texture_velocity_previous));
-
-    let currentColor = textureSampleLevel(texture_velocity_previous, sampler_texture, position, 0);
-    textureStore(texture_velocity_update, texel, currentColor);
-//    textureStore(texture_velocity_update, texel, currentColor + vec4(params.dt/2.0f, 0.0f, 0.0f, 0.0f));
-}
-
 @compute
 @workgroup_size(8, 8)
 fn advectionStep(@builtin(global_invocation_id) pos: vec3u) {
