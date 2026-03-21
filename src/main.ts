@@ -118,6 +118,27 @@ const velocityTextureBuffers = [
     }),
 ];
 
+const divergenceTextureBuffers = [
+    device.createTexture({
+        label: "Divergence Texture Buffer A",
+        size: [SIM_SIZE, SIM_SIZE],
+        format: "rgba16float",
+        usage:
+            GPUTextureUsage.TEXTURE_BINDING |
+            GPUTextureUsage.STORAGE_BINDING |
+            GPUTextureUsage.COPY_DST,
+    }),
+    device.createTexture({
+        label: "Divergence Texture Buffer B",
+        size: [SIM_SIZE, SIM_SIZE],
+        format: "rgba16float",
+        usage:
+            GPUTextureUsage.TEXTURE_BINDING |
+            GPUTextureUsage.STORAGE_BINDING |
+            GPUTextureUsage.COPY_DST,
+    }),
+];
+
 const pressureTextureBuffers = [
     device.createTexture({
         label: "Pressure Texture Buffer A",
@@ -164,16 +185,21 @@ const computeBindGroupLayout = device.createBindGroupLayout({
         {
             binding: 2,
             visibility: GPUShaderStage.COMPUTE,
-            texture: { sampleType: "float" },
+            storageTexture: { format: "rgba16float", access: "write-only" },
         },
         {
             binding: 3,
             visibility: GPUShaderStage.COMPUTE,
+            texture: { sampleType: "float" },
+        },
+        {
+            binding: 4,
+            visibility: GPUShaderStage.COMPUTE,
             storageTexture: { format: "rgba16float", access: "write-only" },
         },
-        { binding: 4, visibility: GPUShaderStage.COMPUTE, sampler: {} },
+        { binding: 5, visibility: GPUShaderStage.COMPUTE, sampler: {} },
         {
-            binding: 5,
+            binding: 6,
             visibility: GPUShaderStage.COMPUTE,
             buffer: { type: "uniform" },
         },
@@ -203,10 +229,20 @@ const renderPipelineLayout = device.createPipelineLayout({
     bindGroupLayouts: [renderBindGroupLayout],
 });
 
-const computePipeline = device.createComputePipeline({
-    label: "Compute Pipeline",
+const advectionComputePipeline = device.createComputePipeline({
+    label: "Advection Compute Pipeline",
     layout: computePipelineLayout,
-    compute: { module: computeShader, entryPoint: "computeMain" },
+    compute: { module: computeShader, entryPoint: "advectionStep" },
+});
+// const diffuseComputePipeline = device.createComputePipeline({
+//     label: "Diffuse Compute Pipeline",
+//     layout: computePipelineLayout,
+//     compute: { module: computeShader, entryPoint: "diffuseStep" },
+// });
+const divergenceComputePipeline = device.createComputePipeline({
+    label: "Dissipate Compute Pipeline",
+    layout: computePipelineLayout,
+    compute: { module: computeShader, entryPoint: "divergenceStep" },
 });
 
 const renderPipeline = device.createRenderPipeline({
@@ -237,18 +273,22 @@ const computeBindGroups = [
             },
             {
                 binding: 2,
-                resource: pressureTextureBuffers[0].createView(),
+                resource: divergenceTextureBuffers[0].createView(),
             },
             {
                 binding: 3,
-                resource: pressureTextureBuffers[1].createView(),
+                resource: pressureTextureBuffers[0].createView(),
             },
             {
                 binding: 4,
-                resource: sampler,
+                resource: pressureTextureBuffers[1].createView(),
             },
             {
                 binding: 5,
+                resource: sampler,
+            },
+            {
+                binding: 6,
                 resource: { buffer: uniformBuffer },
             },
         ],
@@ -267,18 +307,22 @@ const computeBindGroups = [
             },
             {
                 binding: 2,
-                resource: pressureTextureBuffers[1].createView(),
+                resource: divergenceTextureBuffers[1].createView(),
             },
             {
                 binding: 3,
-                resource: pressureTextureBuffers[0].createView(),
+                resource: pressureTextureBuffers[1].createView(),
             },
             {
                 binding: 4,
-                resource: sampler,
+                resource: pressureTextureBuffers[0].createView(),
             },
             {
                 binding: 5,
+                resource: sampler,
+            },
+            {
+                binding: 6,
                 resource: { buffer: uniformBuffer },
             },
         ],
@@ -356,17 +400,43 @@ const render = (deltaTime: number, elapsedTime: number) => {
     );
 
     // COMPUTE PASS
-    const computePass = encoder.beginComputePass();
-    computePass.setPipeline(computePipeline);
-    computePass.setBindGroup(
+    const workgroupCount = Math.ceil(SIM_SIZE / WORKGROUP_SIZE);
+
+    // ADVECTION STEP
+    const advectionComputePass = encoder.beginComputePass();
+
+    advectionComputePass.setPipeline(advectionComputePipeline);
+    advectionComputePass.setBindGroup(
         0,
         computeBindGroups[current_ping_pong_buffer_index],
     );
+    advectionComputePass.dispatchWorkgroups(workgroupCount, workgroupCount);
 
-    const workgroupCount = Math.ceil(SIM_SIZE / WORKGROUP_SIZE);
-    computePass.dispatchWorkgroups(workgroupCount, workgroupCount);
+    advectionComputePass.end();
 
-    computePass.end();
+    // DIFFUSE STEP
+    // const diffuseComputePass = encoder.beginComputePass();
+    //
+    // diffuseComputePass.setPipeline(diffuseComputePipeline);
+    // diffuseComputePass.setBindGroup(
+    //     0,
+    //     computeBindGroups[current_ping_pong_buffer_index],
+    // );
+    // diffuseComputePass.dispatchWorkgroups(workgroupCount, workgroupCount);
+    //
+    // diffuseComputePass.end();
+
+    // DISSIPATE STEP
+    const divergenceComputePass = encoder.beginComputePass();
+
+    divergenceComputePass.setPipeline(divergenceComputePipeline);
+    divergenceComputePass.setBindGroup(
+        0,
+        computeBindGroups[current_ping_pong_buffer_index],
+    );
+    divergenceComputePass.dispatchWorkgroups(workgroupCount, workgroupCount);
+
+    divergenceComputePass.end();
 
     // RENDER PASS
     // @ts-ignore
