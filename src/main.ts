@@ -6,12 +6,28 @@ let current_ping_pong_buffer_index = 1;
 let startTime: number;
 let lastFrameTime: number;
 
+const rectSDF = (x: number, y: number, halfW: number, halfH: number) => {
+    const cx = SIM_SIZE / 2;
+    const cy = SIM_SIZE / 2;
+    const dx = Math.abs(x - cx) - halfW;
+    const dy = Math.abs(y - cy) - halfH;
+    return Math.max(dx, dy);
+};
+
+const smoothstep = (edge0: number, edge1: number, x: number) => {
+    const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
+    return t * t * (3 - 2 * t);
+};
+
+const FADE_WIDTH = 5; // pixels over which the border fades
+
 const getInitialVelocity = (x: number, y: number) => {
-    // return Math.abs(x-y) / SIM_SIZE;
-    return {
-        x: 1.0,
-        y: 0.0,
-    };
+    const halfW = SIM_SIZE / 2 - SIM_SIZE / 3; // matches your xSize inset
+    const halfH = SIM_SIZE / 2 - (SIM_SIZE / 10) * 4; // matches your ySize*4 inset
+    const d = rectSDF(x, y, halfW, halfH);
+    // d < 0 → fully inside, d > FADE_WIDTH → fully outside
+    const intensity = 1 - smoothstep(-FADE_WIDTH, 0, d);
+    return { x: 0.0, y: intensity };
 };
 
 const startTextureData = new Float16Array(SIM_SIZE * SIM_SIZE * 4); // 4 channels (rgba)
