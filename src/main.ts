@@ -3,15 +3,18 @@ import {SIM_SIZE, WORKGROUP_SIZE} from "./constants.ts";
 
 let current_ping_pong_buffer_index = 1;
 
-const debugData = new Float32Array(SIM_SIZE * SIM_SIZE * 4); // 4 channels (rgba)
+let startTime: number;
+let lastFrameTime: number;
+
+const startTextureData = new Float16Array(SIM_SIZE * SIM_SIZE * 4); // 4 channels (rgba)
 for (let y = 0; y < SIM_SIZE; y++) {
     for (let x = 0; x < SIM_SIZE; x++) {
         const i = (y * SIM_SIZE + x) * 4;
         const val = y % 2 === 0 ? 1.0 : 0.0;
-        debugData[i + 0] = val; // r
-        debugData[i + 1] = val; // g
-        debugData[i + 2] = 0.0; // b
-        debugData[i + 3] = 1.0; // a
+        startTextureData[i + 0] = 0.0; // r
+        startTextureData[i + 1] = val; // g
+        startTextureData[i + 2] = 0.0; // b
+        startTextureData[i + 3] = 1.0; // a
     }
 }
 
@@ -113,7 +116,6 @@ const pressureTextureBuffers = [
 ]
 
 const sampler = device.createSampler({
-    // TODO: fix this
     // magFilter: "linear",
     // minFilter: "linear",
     magFilter: "nearest",
@@ -284,9 +286,9 @@ const renderPassDescriptor = {
 // debug first state
 device.queue.writeTexture(
     {texture: velocityTextureBuffers[0]},
-    debugData,
-    //      rgba * float32 * ...
-    {bytesPerRow: 4 * 4 * SIM_SIZE},
+    startTextureData,
+    //      rgba * float16 * ...
+    {bytesPerRow: 4 * 2 * SIM_SIZE},
     {width: SIM_SIZE, height: SIM_SIZE}
 )
 
@@ -297,6 +299,9 @@ const render = (deltaTime:number, elapsedTime:number) => {
     renderPassDescriptor.colorAttachments[0].view = context.getCurrentTexture().createView()
 
     const encoder = device.createCommandEncoder({label: "command encoder"})
+
+    // UNIFORMS
+    device.queue.writeBuffer(uniformBuffer, 0, new Float32Array([deltaTime/1000, 1.0/SIM_SIZE]));
 
     // COMPUTE PASS
     const computePass = encoder.beginComputePass()
@@ -320,8 +325,6 @@ const render = (deltaTime:number, elapsedTime:number) => {
 
     device.queue.submit([encoder.finish()])
 }
-let startTime: number;
-let lastFrameTime: number;
 
 const renderLoop = (timestamp: number) => {
     if (startTime === undefined) {

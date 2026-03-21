@@ -10,6 +10,7 @@ struct VertexOut {
 fn fs(in: VertexOut) -> @location(0) vec4f {
     let vel = textureSample(texture_velocity, sampler_texture, in.uv);
 
-    return vec4f(vel.xyz, 1.0);
+    return vel;
+//    return vec4f(vel.xyz, 1.0);
 //    return vec4f(in.uv, 0.0, 1.0);
 }

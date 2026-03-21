@@ -10,8 +10,7 @@ struct SimParams {
 @group(0) @binding(3) var texture_pressure_update: texture_storage_2d<rgba16float, write>;
 
 @group(0) @binding(4) var sampler_texture: sampler;
-@group(0) @binding(5) var<uniform> dt: SimParams;
-
+@group(0) @binding(5) var<uniform> params: SimParams;
 
 
 @compute
@@ -21,5 +20,5 @@ fn computeMain(@builtin(global_invocation_id) pos: vec3u) {
     let position = (vec2f(texel) + 0.5) / vec2f(textureDimensions(texture_velocity_previous));
 
     let currentColor = textureSampleLevel(texture_velocity_previous, sampler_texture, position, 0);
-    textureStore(texture_velocity_update, texel, currentColor + vec4(.005f, 0.0f, 0.0f, 0.0f));
+    textureStore(texture_velocity_update, texel, currentColor + vec4(params.dt/2.0f, 0.0f, 0.0f, 0.0f));
 }
