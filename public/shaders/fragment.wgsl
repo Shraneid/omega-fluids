@@ -1,4 +1,4 @@
-@group(0) @binding(0) var texture_velocity: texture_2d<f32>;
+@group(0) @binding(0) var texture: texture_2d<f32>;
 @group(0) @binding(1) var sampler_texture: sampler;
 
 struct VertexOut {
@@ -8,7 +8,5 @@ struct VertexOut {
 
 @fragment
 fn fs(in: VertexOut) -> @location(0) vec4f {
-    let velocity = textureSample(texture_velocity, sampler_texture, in.uv);
-
-    return vec4f(vec3f(length(velocity.xy)), 1.0);
+    return textureSample(texture, sampler_texture, in.uv);
 }

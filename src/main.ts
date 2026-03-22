@@ -8,6 +8,12 @@ let mouseDown = false;
 let mousePos = { x: 0, y: 0 };
 let mouseDelta = { x: 0, y: 0 };
 
+const currentColor = {
+    r: getRandomInt(256) / 256,
+    g: getRandomInt(256) / 256,
+    b: getRandomInt(256) / 256,
+};
+
 const rectSDF = (x: number, y: number, halfW: number, halfH: number) => {
     const cx = SIM_SIZE / 2;
     const cy = SIM_SIZE / 2;
@@ -49,16 +55,27 @@ const canvas: HTMLCanvasElement = document.getElementById(
     "GLCanvas",
 )! as HTMLCanvasElement;
 
+function getRandomInt(max: number) {
+    return Math.floor(Math.random() * max);
+}
+
 // SETTING UP MOUSE MOVEMENT
 canvas.addEventListener("mousedown", () => {
     mouseDown = true;
+
+    currentColor.r = getRandomInt(256) / 256;
+    currentColor.g = getRandomInt(256) / 256;
+    currentColor.b = getRandomInt(256) / 256;
 });
 canvas.addEventListener("mouseup", () => {
     mouseDown = false;
     mouseDelta = { x: 0, y: 0 };
 });
 canvas.addEventListener("mousemove", (e) => {
-    // if (!mouseDown) return;
+    if (!mouseDown) {
+        mousePos = { x: -1, y: -1 };
+        return;
+    }
     const rect = canvas.getBoundingClientRect();
 
     mouseDelta = { x: e.movementX / rect.width, y: -e.movementY / rect.width };
@@ -114,7 +131,7 @@ const projectionShader = await loadShaderModule("shaders/projection.wgsl");
 // BUFFERS
 const uniformBuffer = device.createBuffer({
     label: "Uniform Buffer",
-    size: 32,
+    size: 48,
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
 });
 
@@ -182,6 +199,28 @@ const pressureTextureBuffers = [
     }),
 ];
 
+const dyeTextureBuffers = [
+    device.createTexture({
+        label: "Dye Texture Buffer A",
+        size: [SIM_SIZE, SIM_SIZE],
+        format: "rgba16float",
+        usage:
+            GPUTextureUsage.TEXTURE_BINDING |
+            GPUTextureUsage.STORAGE_BINDING |
+            GPUTextureUsage.COPY_DST,
+    }),
+    device.createTexture({
+        label: "Dye Texture Buffer B",
+        size: [SIM_SIZE, SIM_SIZE],
+        format: "rgba16float",
+        usage:
+            GPUTextureUsage.TEXTURE_BINDING |
+            GPUTextureUsage.STORAGE_BINDING |
+            GPUTextureUsage.COPY_DST |
+            GPUTextureUsage.COPY_SRC,
+    }),
+];
+
 const sampler = device.createSampler({
     magFilter: "linear",
     minFilter: "linear",
@@ -192,7 +231,7 @@ const sampler = device.createSampler({
 
 // BIND GROUP LAYOUTS
 
-// Advection: reads velocity[0], writes velocity[1], sampler, uniforms
+// Advection: reads velocity[0], writes velocity[1], reads dye[0], writes dye[1], sampler, uniforms
 const advectionBindGroupLayout = device.createBindGroupLayout({
     label: "Advection Bind Group Layout",
     entries: [
@@ -211,6 +250,16 @@ const advectionBindGroupLayout = device.createBindGroupLayout({
             binding: 3,
             visibility: GPUShaderStage.COMPUTE,
             buffer: { type: "uniform" },
+        },
+        {
+            binding: 4,
+            visibility: GPUShaderStage.COMPUTE,
+            texture: { sampleType: "float" },
+        },
+        {
+            binding: 5,
+            visibility: GPUShaderStage.COMPUTE,
+            storageTexture: { format: "rgba16float", access: "write-only" },
         },
     ],
 });
@@ -342,7 +391,7 @@ const renderPipeline = device.createRenderPipeline({
 
 // BIND GROUPS
 
-// Advection: reads velocity[0], writes velocity[1]
+// Advection: reads velocity[0], writes velocity[1], reads dye[0], writes dye[1]
 const advectionBindGroup = device.createBindGroup({
     label: "Advection Bind Group",
     layout: advectionBindGroupLayout,
@@ -351,6 +400,8 @@ const advectionBindGroup = device.createBindGroup({
         { binding: 1, resource: velocityTextureBuffers[1].createView() },
         { binding: 2, resource: sampler },
         { binding: 3, resource: { buffer: uniformBuffer } },
+        { binding: 4, resource: dyeTextureBuffers[0].createView() },
+        { binding: 5, resource: dyeTextureBuffers[1].createView() },
     ],
 });
 
@@ -397,12 +448,12 @@ const projectionBindGroup = device.createBindGroup({
     ],
 });
 
-// Render: reads velocity[1] (advection output, until projection is added)
+// Render: reads dye[1] (advection output)
 const renderBindGroup = device.createBindGroup({
     label: "Render Bind Group",
     layout: renderBindGroupLayout,
     entries: [
-        { binding: 0, resource: velocityTextureBuffers[0].createView() },
+        { binding: 0, resource: dyeTextureBuffers[1].createView() },
         { binding: 1, resource: sampler },
     ],
 });
@@ -442,12 +493,16 @@ const render = (deltaTime: number, elapsedTime: number) => {
         uniformBuffer,
         0,
         new Float32Array([
-            deltaTime / 1000,
-            1.0 / SIM_SIZE,
+            currentColor.r,
+            currentColor.g,
+            currentColor.b,
+            1.0, // currentColor.a
             mousePos.x,
             mousePos.y,
             mouseDelta.x * (mouseDown ? 1.0 : 0.0),
             mouseDelta.y * (mouseDown ? 1.0 : 0.0),
+            deltaTime / 1000,
+            elapsedTime,
         ]),
     );
 
@@ -483,6 +538,12 @@ const render = (deltaTime: number, elapsedTime: number) => {
     projectionPass.setBindGroup(0, projectionBindGroup);
     projectionPass.dispatchWorkgroups(workgroupCount, workgroupCount);
     projectionPass.end();
+
+    encoder.copyTextureToTexture(
+        { texture: dyeTextureBuffers[1] },
+        { texture: dyeTextureBuffers[0] },
+        [SIM_SIZE, SIM_SIZE],
+    );
 
     // TEMP: visualize advection
     // encoder.copyTextureToTexture(
