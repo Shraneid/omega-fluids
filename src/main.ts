@@ -4,6 +4,10 @@ import { SIM_SIZE, WORKGROUP_SIZE } from "./constants.ts";
 let startTime: number;
 let lastFrameTime: number;
 
+let mouseDown = false;
+let mousePos = { x: 0, y: 0 };
+let mouseDelta = { x: 0, y: 0 };
+
 const rectSDF = (x: number, y: number, halfW: number, halfH: number) => {
     const cx = SIM_SIZE / 2;
     const cy = SIM_SIZE / 2;
@@ -33,7 +37,7 @@ for (let y = 0; y < SIM_SIZE; y++) {
     for (let x = 0; x < SIM_SIZE; x++) {
         const i = (y * SIM_SIZE + x) * 4;
         const val = getInitialVelocity(x, y);
-        startTextureData[i + 0] = val.x; // r // right
+        startTextureData[i] = val.x; // r // right
         startTextureData[i + 1] = val.y; // g // up
         startTextureData[i + 2] = 0.0; // b // unused
         startTextureData[i + 3] = 1.0; // a // unused
@@ -44,6 +48,21 @@ for (let y = 0; y < SIM_SIZE; y++) {
 const canvas: HTMLCanvasElement = document.getElementById(
     "GLCanvas",
 )! as HTMLCanvasElement;
+
+// SETTING UP MOUSE MOVEMENT
+canvas.addEventListener("mousedown", () => {
+    mouseDown = true;
+});
+canvas.addEventListener("mouseup", () => {
+    mouseDown = false;
+});
+canvas.addEventListener("mousemove", (e) => {
+    // if (!mouseDown) return;
+    const rect = canvas.getBoundingClientRect();
+
+    mouseDelta = { x: e.movementX, y: 1 - e.movementY };
+    mousePos = { x: e.offsetX / rect.width, y: 1 - e.offsetY / rect.width };
+});
 
 // MAIN SETUP FOR RENDERING
 const adapter = await navigator.gpu?.requestAdapter();
@@ -94,7 +113,7 @@ const projectionShader = await loadShaderModule("shaders/projection.wgsl");
 // BUFFERS
 const uniformBuffer = device.createBuffer({
     label: "Uniform Buffer",
-    size: 16,
+    size: 32,
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
 });
 
@@ -421,7 +440,14 @@ const render = (deltaTime: number, elapsedTime: number) => {
     device.queue.writeBuffer(
         uniformBuffer,
         0,
-        new Float32Array([deltaTime / 1000, 1.0 / SIM_SIZE]),
+        new Float32Array([
+            deltaTime / 1000,
+            1.0 / SIM_SIZE,
+            mousePos.x,
+            mousePos.y,
+            mouseDelta.x * (mouseDown ? 1.0 : 0.0),
+            mouseDelta.y * (mouseDown ? 1.0 : 0.0),
+        ]),
     );
 
     // COMPUTE PASSES
