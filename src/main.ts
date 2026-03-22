@@ -1,8 +1,6 @@
 import "./style.css";
 import { SIM_SIZE, WORKGROUP_SIZE } from "./constants.ts";
 
-let current_ping_pong_buffer_index = 1;
-
 let startTime: number;
 let lastFrameTime: number;
 
@@ -22,10 +20,10 @@ const smoothstep = (edge0: number, edge1: number, x: number) => {
 const FADE_WIDTH = 5; // pixels over which the border fades
 
 const getInitialVelocity = (x: number, y: number) => {
-    const halfW = SIM_SIZE / 2 - SIM_SIZE / 3; // matches your xSize inset
-    const halfH = SIM_SIZE / 2 - (SIM_SIZE / 10) * 4; // matches your ySize*4 inset
+    const halfW = SIM_SIZE / 2 - SIM_SIZE / 3;
+    const halfH = SIM_SIZE / 2 - (SIM_SIZE / 10) * 4;
     const d = rectSDF(x, y, halfW, halfH);
-    // d < 0 → fully inside, d > FADE_WIDTH → fully outside
+
     const intensity = 1 - smoothstep(-FADE_WIDTH, 0, d);
     return { x: 0.0, y: intensity };
 };
@@ -87,7 +85,10 @@ const loadShaderModule = async (path: string): Promise<GPUShaderModule> => {
 
 const vertexShader = await loadShaderModule("shaders/vertex.wgsl");
 const fragmentShader = await loadShaderModule("shaders/fragment.wgsl");
-const computeShader = await loadShaderModule("shaders/compute.wgsl");
+const advectionShader = await loadShaderModule("shaders/advection.wgsl");
+const divergenceShader = await loadShaderModule("shaders/divergence.wgsl");
+const pressureShader = await loadShaderModule("shaders/pressure.wgsl");
+const projectionShader = await loadShaderModule("shaders/projection.wgsl");
 // END LOAD SHADERS
 
 // BUFFERS
@@ -114,6 +115,7 @@ const velocityTextureBuffers = [
         usage:
             GPUTextureUsage.TEXTURE_BINDING |
             GPUTextureUsage.STORAGE_BINDING |
+            GPUTextureUsage.COPY_SRC |
             GPUTextureUsage.COPY_DST,
     }),
 ];
@@ -169,8 +171,10 @@ const sampler = device.createSampler({
 // END BUFFERS
 
 // BIND GROUP LAYOUTS
-const computeBindGroupLayout = device.createBindGroupLayout({
-    label: "Compute Bind Group Layout",
+
+// Advection: reads velocity[0], writes velocity[1], sampler, uniforms
+const advectionBindGroupLayout = device.createBindGroupLayout({
+    label: "Advection Bind Group Layout",
     entries: [
         {
             binding: 0,
@@ -182,26 +186,72 @@ const computeBindGroupLayout = device.createBindGroupLayout({
             visibility: GPUShaderStage.COMPUTE,
             storageTexture: { format: "rgba16float", access: "write-only" },
         },
+        { binding: 2, visibility: GPUShaderStage.COMPUTE, sampler: {} },
+        {
+            binding: 3,
+            visibility: GPUShaderStage.COMPUTE,
+            buffer: { type: "uniform" },
+        },
+    ],
+});
+
+// Divergence: reads velocity[1], writes divergence[0]
+const divergenceBindGroupLayout = device.createBindGroupLayout({
+    label: "Divergence Bind Group Layout",
+    entries: [
+        {
+            binding: 0,
+            visibility: GPUShaderStage.COMPUTE,
+            texture: { sampleType: "float" },
+        },
+        {
+            binding: 1,
+            visibility: GPUShaderStage.COMPUTE,
+            storageTexture: { format: "rgba16float", access: "write-only" },
+        },
+    ],
+});
+
+// Pressure: reads divergence[0] + pressure[i%2], writes pressure[(i+1)%2]
+const pressureBindGroupLayout = device.createBindGroupLayout({
+    label: "Pressure Bind Group Layout",
+    entries: [
+        {
+            binding: 0,
+            visibility: GPUShaderStage.COMPUTE,
+            texture: { sampleType: "float" },
+        },
+        {
+            binding: 1,
+            visibility: GPUShaderStage.COMPUTE,
+            texture: { sampleType: "float" },
+        },
         {
             binding: 2,
             visibility: GPUShaderStage.COMPUTE,
             storageTexture: { format: "rgba16float", access: "write-only" },
         },
+    ],
+});
+
+// Projection: reads velocity[1] + pressure, writes velocity[0]
+const projectionBindGroupLayout = device.createBindGroupLayout({
+    label: "Projection Bind Group Layout",
+    entries: [
         {
-            binding: 3,
+            binding: 0,
             visibility: GPUShaderStage.COMPUTE,
             texture: { sampleType: "float" },
         },
         {
-            binding: 4,
+            binding: 1,
+            visibility: GPUShaderStage.COMPUTE,
+            texture: { sampleType: "float" },
+        },
+        {
+            binding: 2,
             visibility: GPUShaderStage.COMPUTE,
             storageTexture: { format: "rgba16float", access: "write-only" },
-        },
-        { binding: 5, visibility: GPUShaderStage.COMPUTE, sampler: {} },
-        {
-            binding: 6,
-            visibility: GPUShaderStage.COMPUTE,
-            buffer: { type: "uniform" },
         },
     ],
 });
@@ -220,10 +270,6 @@ const renderBindGroupLayout = device.createBindGroupLayout({
 // END BIND GROUP LAYOUTS
 
 // PIPELINES SETUP
-const computePipelineLayout = device.createPipelineLayout({
-    label: "Compute Pipeline Layout",
-    bindGroupLayouts: [computeBindGroupLayout],
-});
 const renderPipelineLayout = device.createPipelineLayout({
     label: "Render Pipeline Layout",
     bindGroupLayouts: [renderBindGroupLayout],
@@ -231,18 +277,34 @@ const renderPipelineLayout = device.createPipelineLayout({
 
 const advectionComputePipeline = device.createComputePipeline({
     label: "Advection Compute Pipeline",
-    layout: computePipelineLayout,
-    compute: { module: computeShader, entryPoint: "advectionStep" },
+    layout: device.createPipelineLayout({
+        bindGroupLayouts: [advectionBindGroupLayout],
+    }),
+    compute: { module: advectionShader, entryPoint: "advectionStep" },
 });
-// const diffuseComputePipeline = device.createComputePipeline({
-//     label: "Diffuse Compute Pipeline",
-//     layout: computePipelineLayout,
-//     compute: { module: computeShader, entryPoint: "diffuseStep" },
-// });
+
 const divergenceComputePipeline = device.createComputePipeline({
-    label: "Dissipate Compute Pipeline",
-    layout: computePipelineLayout,
-    compute: { module: computeShader, entryPoint: "divergenceStep" },
+    label: "Divergence Compute Pipeline",
+    layout: device.createPipelineLayout({
+        bindGroupLayouts: [divergenceBindGroupLayout],
+    }),
+    compute: { module: divergenceShader, entryPoint: "divergenceStep" },
+});
+
+const pressureComputePipeline = device.createComputePipeline({
+    label: "Pressure Compute Pipeline",
+    layout: device.createPipelineLayout({
+        bindGroupLayouts: [pressureBindGroupLayout],
+    }),
+    compute: { module: pressureShader, entryPoint: "pressureStep" },
+});
+
+const projectionComputePipeline = device.createComputePipeline({
+    label: "Projection Compute Pipeline",
+    layout: device.createPipelineLayout({
+        bindGroupLayouts: [projectionBindGroupLayout],
+    }),
+    compute: { module: projectionShader, entryPoint: "projectionStep" },
 });
 
 const renderPipeline = device.createRenderPipeline({
@@ -258,107 +320,72 @@ const renderPipeline = device.createRenderPipeline({
     },
 });
 
-const computeBindGroups = [
+// BIND GROUPS
+
+// Advection: reads velocity[0], writes velocity[1]
+const advectionBindGroup = device.createBindGroup({
+    label: "Advection Bind Group",
+    layout: advectionBindGroupLayout,
+    entries: [
+        { binding: 0, resource: velocityTextureBuffers[0].createView() },
+        { binding: 1, resource: velocityTextureBuffers[1].createView() },
+        { binding: 2, resource: sampler },
+        { binding: 3, resource: { buffer: uniformBuffer } },
+    ],
+});
+
+// Divergence: reads velocity[1], writes divergence[0]
+const divergenceBindGroup = device.createBindGroup({
+    label: "Divergence Bind Group",
+    layout: divergenceBindGroupLayout,
+    entries: [
+        { binding: 0, resource: velocityTextureBuffers[1].createView() },
+        { binding: 1, resource: divergenceTextureBuffers[0].createView() },
+    ],
+});
+
+// Pressure: two bind groups for ping-ponging
+const pressureBindGroups = [
     device.createBindGroup({
-        label: "Compute Bind Group A",
-        layout: computeBindGroupLayout,
+        label: "Pressure Bind Group A",
+        layout: pressureBindGroupLayout,
         entries: [
-            {
-                binding: 0,
-                resource: velocityTextureBuffers[0].createView(),
-            },
-            {
-                binding: 1,
-                resource: velocityTextureBuffers[1].createView(),
-            },
-            {
-                binding: 2,
-                resource: divergenceTextureBuffers[0].createView(),
-            },
-            {
-                binding: 3,
-                resource: pressureTextureBuffers[0].createView(),
-            },
-            {
-                binding: 4,
-                resource: pressureTextureBuffers[1].createView(),
-            },
-            {
-                binding: 5,
-                resource: sampler,
-            },
-            {
-                binding: 6,
-                resource: { buffer: uniformBuffer },
-            },
+            { binding: 0, resource: divergenceTextureBuffers[0].createView() },
+            { binding: 1, resource: pressureTextureBuffers[0].createView() },
+            { binding: 2, resource: pressureTextureBuffers[1].createView() },
         ],
     }),
     device.createBindGroup({
-        label: "Compute Bind Group B",
-        layout: computeBindGroupLayout,
+        label: "Pressure Bind Group B",
+        layout: pressureBindGroupLayout,
         entries: [
-            {
-                binding: 0,
-                resource: velocityTextureBuffers[1].createView(),
-            },
-            {
-                binding: 1,
-                resource: velocityTextureBuffers[0].createView(),
-            },
-            {
-                binding: 2,
-                resource: divergenceTextureBuffers[1].createView(),
-            },
-            {
-                binding: 3,
-                resource: pressureTextureBuffers[1].createView(),
-            },
-            {
-                binding: 4,
-                resource: pressureTextureBuffers[0].createView(),
-            },
-            {
-                binding: 5,
-                resource: sampler,
-            },
-            {
-                binding: 6,
-                resource: { buffer: uniformBuffer },
-            },
+            { binding: 0, resource: divergenceTextureBuffers[0].createView() },
+            { binding: 1, resource: pressureTextureBuffers[1].createView() },
+            { binding: 2, resource: pressureTextureBuffers[0].createView() },
         ],
     }),
 ];
 
-const renderBindGroups = [
-    device.createBindGroup({
-        label: "Render Bind Group A",
-        layout: renderBindGroupLayout,
-        entries: [
-            {
-                binding: 0,
-                resource: velocityTextureBuffers[1].createView(),
-            },
-            {
-                binding: 1,
-                resource: sampler,
-            },
-        ],
-    }),
-    device.createBindGroup({
-        label: "Render Bind Group B",
-        layout: renderBindGroupLayout,
-        entries: [
-            {
-                binding: 0,
-                resource: velocityTextureBuffers[0].createView(),
-            },
-            {
-                binding: 1,
-                resource: sampler,
-            },
-        ],
-    }),
-];
+// Projection: reads velocity[1] + pressure, writes velocity[0]
+const projectionBindGroup = device.createBindGroup({
+    label: "Projection Bind Group",
+    layout: projectionBindGroupLayout,
+    entries: [
+        { binding: 0, resource: velocityTextureBuffers[1].createView() },
+        { binding: 1, resource: pressureTextureBuffers[0].createView() },
+        { binding: 2, resource: velocityTextureBuffers[0].createView() },
+    ],
+});
+
+// Render: reads velocity[1] (advection output, until projection is added)
+const renderBindGroup = device.createBindGroup({
+    label: "Render Bind Group",
+    layout: renderBindGroupLayout,
+    entries: [
+        { binding: 0, resource: velocityTextureBuffers[0].createView() },
+        { binding: 1, resource: sampler },
+    ],
+});
 
 const renderPassDescriptor = {
     label: "Render Pass Description",
@@ -384,8 +411,6 @@ device.queue.writeTexture(
 
 // RENDER
 const render = (deltaTime: number, elapsedTime: number) => {
-    current_ping_pong_buffer_index = current_ping_pong_buffer_index ? 0 : 1;
-
     renderPassDescriptor.colorAttachments[0].view = context
         .getCurrentTexture()
         .createView();
@@ -399,55 +424,51 @@ const render = (deltaTime: number, elapsedTime: number) => {
         new Float32Array([deltaTime / 1000, 1.0 / SIM_SIZE]),
     );
 
-    // COMPUTE PASS
+    // COMPUTE PASSES
     const workgroupCount = Math.ceil(SIM_SIZE / WORKGROUP_SIZE);
 
-    // ADVECTION STEP
-    const advectionComputePass = encoder.beginComputePass();
+    // ADVECTION: velocity[0] -> velocity[1]
+    const advectionPass = encoder.beginComputePass();
+    advectionPass.setPipeline(advectionComputePipeline);
+    advectionPass.setBindGroup(0, advectionBindGroup);
+    advectionPass.dispatchWorkgroups(workgroupCount, workgroupCount);
+    advectionPass.end();
 
-    advectionComputePass.setPipeline(advectionComputePipeline);
-    advectionComputePass.setBindGroup(
-        0,
-        computeBindGroups[current_ping_pong_buffer_index],
-    );
-    advectionComputePass.dispatchWorkgroups(workgroupCount, workgroupCount);
+    // DIVERGENCE: velocity[1] -> divergence[0]
+    const divergencePass = encoder.beginComputePass();
+    divergencePass.setPipeline(divergenceComputePipeline);
+    divergencePass.setBindGroup(0, divergenceBindGroup);
+    divergencePass.dispatchWorkgroups(workgroupCount, workgroupCount);
+    divergencePass.end();
 
-    advectionComputePass.end();
+    // PRESSURE SOLVE: divergence[0] + pressure ping-pong
+    for (let i = 0; i < 60; i++) {
+        const pressurePass = encoder.beginComputePass();
+        pressurePass.setPipeline(pressureComputePipeline);
+        pressurePass.setBindGroup(0, pressureBindGroups[i % 2]);
+        pressurePass.dispatchWorkgroups(workgroupCount, workgroupCount);
+        pressurePass.end();
+    }
 
-    // DIFFUSE STEP
-    // const diffuseComputePass = encoder.beginComputePass();
-    //
-    // diffuseComputePass.setPipeline(diffuseComputePipeline);
-    // diffuseComputePass.setBindGroup(
-    //     0,
-    //     computeBindGroups[current_ping_pong_buffer_index],
+    // PROJECTION STEP
+    const projectionPass = encoder.beginComputePass();
+    projectionPass.setPipeline(projectionComputePipeline);
+    projectionPass.setBindGroup(0, projectionBindGroup);
+    projectionPass.dispatchWorkgroups(workgroupCount, workgroupCount);
+    projectionPass.end();
+
+    // TEMP: visualize advection
+    // encoder.copyTextureToTexture(
+    //     { texture: velocityTextureBuffers[1] },
+    //     { texture: velocityTextureBuffers[0] },
+    //     [SIM_SIZE, SIM_SIZE],
     // );
-    // diffuseComputePass.dispatchWorkgroups(workgroupCount, workgroupCount);
-    //
-    // diffuseComputePass.end();
-
-    // DISSIPATE STEP
-    const divergenceComputePass = encoder.beginComputePass();
-
-    divergenceComputePass.setPipeline(divergenceComputePipeline);
-    divergenceComputePass.setBindGroup(
-        0,
-        computeBindGroups[current_ping_pong_buffer_index],
-    );
-    divergenceComputePass.dispatchWorkgroups(workgroupCount, workgroupCount);
-
-    divergenceComputePass.end();
 
     // RENDER PASS
     // @ts-ignore
     const renderPass = encoder.beginRenderPass(renderPassDescriptor);
     renderPass.setPipeline(renderPipeline);
-
-    renderPass.setBindGroup(
-        0,
-        renderBindGroups[current_ping_pong_buffer_index],
-    );
-
+    renderPass.setBindGroup(0, renderBindGroup);
     renderPass.draw(3);
     renderPass.end();
 
