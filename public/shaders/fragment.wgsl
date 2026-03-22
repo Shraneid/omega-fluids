@@ -8,9 +8,7 @@ struct VertexOut {
 
 @fragment
 fn fs(in: VertexOut) -> @location(0) vec4f {
-    let vel = textureSample(texture_velocity, sampler_texture, in.uv);
+    let velocity = textureSample(texture_velocity, sampler_texture, in.uv);
 
-    return vel;
-//    return vec4f(vel.xyz, 1.0);
-//    return vec4f(in.uv, 0.0, 1.0);
+    return vec4f(vec3f(length(velocity.xy)), 1.0);
 }
