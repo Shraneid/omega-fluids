@@ -58,7 +58,7 @@ fn advectionStep(@builtin(global_invocation_id) pos: vec3u) {
         additionalForce = getAdditionalForce(vec2f(texel));
         dyeSplat = getDyeSplat(texel, position);
     }
-    if (params.elapsedTime < 1000){
+    if (params.elapsedTime < 1){
         dyeSplat = getDyeSplat(texel, position);
     }
 
@@ -68,5 +68,6 @@ fn advectionStep(@builtin(global_invocation_id) pos: vec3u) {
     textureStore(texture_velocity_update, texel, vec4f(previousStepVelocity + additionalForce, 0.0, 1.0));
 
     let previousStepDye = textureSampleLevel(texture_dye_previous, sampler_texture, samplePosition, 0);
-    textureStore(texture_dye_update, texel, vec4f(previousStepDye.rgb * 0.99 + dyeSplat.rgb, 1.0));
+    var newDye = previousStepDye.rgb * 0.995 + dyeSplat.rgb;
+    textureStore(texture_dye_update, texel, vec4f(newDye, 1.0));
 }
