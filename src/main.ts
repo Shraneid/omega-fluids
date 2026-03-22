@@ -1,6 +1,11 @@
 import "./style.css";
 import { SIM_SIZE, WORKGROUP_SIZE } from "./constants.ts";
 
+const params = new URLSearchParams(window.location.search);
+const VORTEX_POSITION = parseFloat(params.get("position") ?? "0.15");
+const VORTEX_RADIUS_MULTIPLIER = parseFloat(params.get("radius") ?? "0.06");
+const VORTEX_STRENGTH = parseFloat(params.get("strength") ?? "0.18");
+
 let startTime: number;
 let lastFrameTime: number;
 
@@ -18,17 +23,23 @@ const vortex = (x: number, y: number, cx: number, cy: number, sign: number) => {
     const dx = x - cx;
     const dy = y - cy;
     const r = Math.sqrt(dx * dx + dy * dy);
-    const radius = SIM_SIZE * 0.05;
+    const radius = SIM_SIZE * VORTEX_RADIUS_MULTIPLIER;
     const falloff = Math.exp(-(r * r) / (radius * radius));
     return {
-        x: sign * -dy * falloff * 0.05,
-        y: sign * dx * falloff * 0.05,
+        x: sign * -dy * falloff * VORTEX_STRENGTH,
+        y: sign * dx * falloff * VORTEX_STRENGTH,
     };
 };
 
 const getInitialVelocity = (x: number, y: number) => {
-    const v1 = vortex(x, y, SIM_SIZE * 0.35, SIM_SIZE * 0.5, 1);
-    const v2 = vortex(x, y, SIM_SIZE * 0.65, SIM_SIZE * 0.5, -1);
+    const v1 = vortex(x, y, SIM_SIZE * VORTEX_POSITION, SIM_SIZE * 0.5, 1);
+    const v2 = vortex(
+        x,
+        y,
+        SIM_SIZE * (1 - VORTEX_POSITION),
+        SIM_SIZE * 0.5,
+        -1,
+    );
     return { x: v1.x + v2.x, y: v1.y + v2.y };
 };
 
