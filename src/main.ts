@@ -14,28 +14,18 @@ const currentColor = {
     b: getRandomInt(256) / 256,
 };
 
-const rectSDF = (x: number, y: number, halfW: number, halfH: number) => {
-    const cx = SIM_SIZE / 2;
-    const cy = SIM_SIZE / 2;
-    const dx = Math.abs(x - cx) - halfW;
-    const dy = Math.abs(y - cy) - halfH;
-    return Math.max(dx, dy);
-};
-
-const smoothstep = (edge0: number, edge1: number, x: number) => {
-    const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
-    return t * t * (3 - 2 * t);
-};
-
-const FADE_WIDTH = 5; // pixels over which the border fades
-
 const getInitialVelocity = (x: number, y: number) => {
-    const halfW = SIM_SIZE / 2 - SIM_SIZE / 3;
-    const halfH = SIM_SIZE / 2 - (SIM_SIZE / 10) * 4;
-    const d = rectSDF(x, y, halfW, halfH);
-
-    const intensity = 1 - smoothstep(-FADE_WIDTH, 0, d);
-    return { x: 0.0, y: intensity };
+    if (y < SIM_SIZE / 2) {
+        return {
+            x: -0.2,
+            y: 0,
+        };
+    } else {
+        return {
+            x: 0.2,
+            y: 0,
+        };
+    }
 };
 
 const startTextureData = new Float16Array(SIM_SIZE * SIM_SIZE * 4); // 4 channels (rgba)
