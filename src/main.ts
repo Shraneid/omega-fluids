@@ -14,18 +14,22 @@ const currentColor = {
     b: getRandomInt(256) / 256,
 };
 
+const vortex = (x: number, y: number, cx: number, cy: number, sign: number) => {
+    const dx = x - cx;
+    const dy = y - cy;
+    const r = Math.sqrt(dx * dx + dy * dy);
+    const radius = SIM_SIZE * 0.05;
+    const falloff = Math.exp(-(r * r) / (radius * radius));
+    return {
+        x: sign * -dy * falloff * 0.05,
+        y: sign * dx * falloff * 0.05,
+    };
+};
+
 const getInitialVelocity = (x: number, y: number) => {
-    if (y < SIM_SIZE / 2) {
-        return {
-            x: -0.2,
-            y: 0,
-        };
-    } else {
-        return {
-            x: 0.2,
-            y: 0,
-        };
-    }
+    const v1 = vortex(x, y, SIM_SIZE * 0.35, SIM_SIZE * 0.5, 1);
+    const v2 = vortex(x, y, SIM_SIZE * 0.65, SIM_SIZE * 0.5, -1);
+    return { x: v1.x + v2.x, y: v1.y + v2.y };
 };
 
 const startTextureData = new Float16Array(SIM_SIZE * SIM_SIZE * 4); // 4 channels (rgba)
