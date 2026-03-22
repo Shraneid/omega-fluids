@@ -19,6 +19,26 @@ fn projectionStep(@builtin(global_invocation_id) pos: vec3u) {
     let texel = pos.xy;
 
     if (isBoundary(texel)) {
+        var reflectedVelocity = vec2f(0);
+        var normalReflect = vec2f(1, 1);
+        if (texel.x == 0){
+            reflectedVelocity = textureLoad(texture_velocity_previous, vec2i(texel) + vec2i( 1, 0), 0).xy;
+            reflectedVelocity.x *= -1;
+        }
+        else if (texel.x == SIM_SIZE - 1){
+            reflectedVelocity = textureLoad(texture_velocity_previous, vec2i(texel) + vec2i( -1, 0), 0).xy;
+            reflectedVelocity.x *= -1;
+        }
+        else if (texel.y == 0){
+            reflectedVelocity = textureLoad(texture_velocity_previous, vec2i(texel) + vec2i( 0, 1), 0).xy;
+            reflectedVelocity.y *= -1;
+        }
+        else if (texel.y == SIM_SIZE - 1){
+            reflectedVelocity = textureLoad(texture_velocity_previous, vec2i(texel) + vec2i( 0, -1), 0).xy;
+            reflectedVelocity.y *= -1;
+        }
+
+        textureStore(texture_velocity_updated, texel, vec4f(reflectedVelocity, 0.0, 1.0));
         return;
     }
 

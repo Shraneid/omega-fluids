@@ -19,6 +19,17 @@ fn pressureStep(@builtin(global_invocation_id) pos: vec3u) {
     let texel = pos.xy;
 
     if (isBoundary(texel)) {
+        var edgePressure = 0.0;
+        if (texel.x == 0) {
+            edgePressure = textureLoad(texture_pressure_previous, vec2i(texel) + vec2i( 1, 0), 0).r;
+        } else if (texel.x == SIM_SIZE - 1) {
+            edgePressure = textureLoad(texture_pressure_previous, vec2i(texel) + vec2i( -1, 0), 0).r;
+        } else if (texel.y == 0) {
+            edgePressure = textureLoad(texture_pressure_previous, vec2i(texel) + vec2i( 0, 1), 0).r;
+        } else if (texel.y == SIM_SIZE - 1) {
+            edgePressure = textureLoad(texture_pressure_previous, vec2i(texel) + vec2i( 0, -1), 0).r;
+        }
+        textureStore(texture_pressure_update, texel, vec4f(edgePressure, 0.0, 0.0, 0.0));
         return;
     }
 
