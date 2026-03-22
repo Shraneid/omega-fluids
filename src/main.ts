@@ -55,12 +55,13 @@ canvas.addEventListener("mousedown", () => {
 });
 canvas.addEventListener("mouseup", () => {
     mouseDown = false;
+    mouseDelta = { x: 0, y: 0 };
 });
 canvas.addEventListener("mousemove", (e) => {
     // if (!mouseDown) return;
     const rect = canvas.getBoundingClientRect();
 
-    mouseDelta = { x: e.movementX, y: 1 - e.movementY };
+    mouseDelta = { x: e.movementX / rect.width, y: -e.movementY / rect.width };
     mousePos = { x: e.offsetX / rect.width, y: 1 - e.offsetY / rect.width };
 });
 

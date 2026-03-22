@@ -1,4 +1,5 @@
 const SIM_SIZE = 1024;
+const MOUSE_FORCE_MULTIPLIER = 5.0;
 
 struct SimParams {
     dt: f32,
@@ -15,7 +16,7 @@ struct SimParams {
 
 fn getAdditionalForce(currentPosition: vec2f) -> vec2f {
     let mousePosition = params.mousePos;
-    let forceDirection = select(vec2f(0), params.mouseDelta, length(params.mouseDelta) > 2);
+    let forceDirection = params.mouseDelta;
 
     let currentPositionUV = currentPosition / vec2f(SIM_SIZE);
 
@@ -23,7 +24,7 @@ fn getAdditionalForce(currentPosition: vec2f) -> vec2f {
 
     let force = smoothstep(0.1, 0.0, distance);
 
-    return forceDirection * force;
+    return forceDirection * force * MOUSE_FORCE_MULTIPLIER;
 }
 
 @compute @workgroup_size(8, 8)
