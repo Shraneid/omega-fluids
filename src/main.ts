@@ -64,13 +64,16 @@ function getRandomInt(max: number) {
     return Math.floor(Math.random() * max);
 }
 
-// SETTING UP MOUSE MOVEMENT
-canvas.addEventListener("mousedown", () => {
-    mouseDown = true;
-
+function randomizeColor() {
     currentColor.r = getRandomInt(256) / 256;
     currentColor.g = getRandomInt(256) / 256;
     currentColor.b = getRandomInt(256) / 256;
+}
+
+// SETTING UP MOUSE MOVEMENT
+canvas.addEventListener("mousedown", () => {
+    mouseDown = true;
+    randomizeColor();
 });
 canvas.addEventListener("mouseup", () => {
     mouseDown = false;
@@ -86,6 +89,54 @@ canvas.addEventListener("mousemove", (e) => {
     mouseDelta = { x: e.movementX / rect.width, y: -e.movementY / rect.width };
     mousePos = { x: e.offsetX / rect.width, y: 1 - e.offsetY / rect.width };
 });
+
+// SETTING UP TOUCH INPUT
+let lastTouchPos = { x: 0, y: 0 };
+canvas.addEventListener(
+    "touchstart",
+    (e) => {
+        e.preventDefault();
+        mouseDown = true;
+        randomizeColor();
+        const rect = canvas.getBoundingClientRect();
+        const touch = e.touches[0];
+        lastTouchPos = { x: touch.clientX, y: touch.clientY };
+        mousePos = {
+            x: (touch.clientX - rect.left) / rect.width,
+            y: 1 - (touch.clientY - rect.top) / rect.height,
+        };
+    },
+    { passive: false },
+);
+
+canvas.addEventListener(
+    "touchend",
+    (e) => {
+        e.preventDefault();
+        mouseDown = false;
+        mouseDelta = { x: 0, y: 0 };
+    },
+    { passive: false },
+);
+
+canvas.addEventListener(
+    "touchmove",
+    (e) => {
+        e.preventDefault();
+        const rect = canvas.getBoundingClientRect();
+        const touch = e.touches[0];
+        mouseDelta = {
+            x: (touch.clientX - lastTouchPos.x) / rect.width,
+            y: -(touch.clientY - lastTouchPos.y) / rect.height,
+        };
+        mousePos = {
+            x: (touch.clientX - rect.left) / rect.width,
+            y: 1 - (touch.clientY - rect.top) / rect.height,
+        };
+        lastTouchPos = { x: touch.clientX, y: touch.clientY };
+    },
+    { passive: false },
+);
 
 // MAIN SETUP FOR RENDERING
 const adapter = await navigator.gpu?.requestAdapter();
